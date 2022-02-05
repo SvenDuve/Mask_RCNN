@@ -550,12 +550,12 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     # Positive ROIs
     positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
                          config.ROI_POSITIVE_RATIO)
-    positive_indices = tf.random_shuffle(positive_indices)[:positive_count]
+    positive_indices = tf.random.shuffle(positive_indices)[:positive_count]
     positive_count = tf.shape(positive_indices)[0]
     # Negative ROIs. Add enough to maintain positive:negative ratio.
     r = 1.0 / config.ROI_POSITIVE_RATIO
     negative_count = tf.cast(r * tf.cast(positive_count, tf.float32), tf.int32) - positive_count
-    negative_indices = tf.random_shuffle(negative_indices)[:negative_count]
+    negative_indices = tf.random.shuffle(negative_indices)[:negative_count]
     # Gather selected ROIs
     positive_rois = tf.gather(proposals, positive_indices)
     negative_rois = tf.gather(proposals, negative_indices)
@@ -1318,7 +1318,7 @@ def build_detection_targets(rpn_rois, gt_class_ids, gt_boxes, gt_masks, config):
     # according to XinLei Chen's paper, it doesn't help.
 
     # Trim empty padding in gt_boxes and gt_masks parts
-    instance_ids = np.where(gt_class_ids > 0)[0]
+    instance_ids = tf.where(gt_class_ids > 0)[0]
     assert instance_ids.shape[0] > 0, "Image must contain instances."
     gt_class_ids = gt_class_ids[instance_ids]
     gt_boxes = gt_boxes[instance_ids]
@@ -1346,12 +1346,12 @@ def build_detection_targets(rpn_rois, gt_class_ids, gt_boxes, gt_masks, config):
     rpn_roi_gt_class_ids = gt_class_ids[rpn_roi_iou_argmax]
 
     # Positive ROIs are those with >= 0.5 IoU with a GT box.
-    fg_ids = np.where(rpn_roi_iou_max > 0.5)[0]
+    fg_ids = tf.where(rpn_roi_iou_max > 0.5)[0]
 
     # Negative ROIs are those with max IoU 0.1-0.5 (hard example mining)
     # TODO: To hard example mine or not to hard example mine, that's the question
-    # bg_ids = np.where((rpn_roi_iou_max >= 0.1) & (rpn_roi_iou_max < 0.5))[0]
-    bg_ids = np.where(rpn_roi_iou_max < 0.5)[0]
+    # bg_ids = tf.where((rpn_roi_iou_max >= 0.1) & (rpn_roi_iou_max < 0.5))[0]
+    bg_ids = tf.where(rpn_roi_iou_max < 0.5)[0]
 
     # Subsample ROIs. Aim for 33% foreground.
     # FG
@@ -1378,7 +1378,7 @@ def build_detection_targets(rpn_rois, gt_class_ids, gt_boxes, gt_masks, config):
         # There is a small chance we have neither fg nor bg samples.
         if keep.shape[0] == 0:
             # Pick bg regions with easier IoU threshold
-            bg_ids = np.where(rpn_roi_iou_max < 0.5)[0]
+            bg_ids = tf.where(rpn_roi_iou_max < 0.5)[0]
             assert bg_ids.shape[0] >= remaining
             keep_bg_ids = np.random.choice(bg_ids, remaining, replace=False)
             assert keep_bg_ids.shape[0] == remaining
@@ -1405,7 +1405,7 @@ def build_detection_targets(rpn_rois, gt_class_ids, gt_boxes, gt_masks, config):
     # Class-aware bbox deltas. [y, x, log(h), log(w)]
     bboxes = np.zeros((config.TRAIN_ROIS_PER_IMAGE,
                        config.NUM_CLASSES, 4), dtype=np.float32)
-    pos_ids = np.where(roi_gt_class_ids > 0)[0]
+    pos_ids = tf.where(roi_gt_class_ids > 0)[0]
     bboxes[pos_ids, roi_gt_class_ids[pos_ids]] = utils.box_refinement(
         rois[pos_ids], roi_gt_boxes[pos_ids, :4])
     # Normalize bbox refinements
@@ -1463,10 +1463,10 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     # Handle COCO crowds
     # A crowd box in COCO is a bounding box around several instances. Exclude
     # them from training. A crowd box is given a negative class ID.
-    crowd_ix = np.where(gt_class_ids < 0)[0]
+    crowd_ix = tf.where(gt_class_ids < 0)[0]
     if crowd_ix.shape[0] > 0:
         # Filter out crowds from ground truth class IDs and boxes
-        non_crowd_ix = np.where(gt_class_ids > 0)[0]
+        non_crowd_ix = tf.where(gt_class_ids > 0)[0]
         crowd_boxes = gt_boxes[crowd_ix]
         gt_class_ids = gt_class_ids[non_crowd_ix]
         gt_boxes = gt_boxes[non_crowd_ix]
@@ -1503,14 +1503,14 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
 
     # Subsample to balance positive and negative anchors
     # Don't let positives be more than half the anchors
-    ids = np.where(rpn_match == 1)[0]
+    ids = tf.where(rpn_match == 1)[0]
     extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE // 2)
     if extra > 0:
         # Reset the extra ones to neutral
         ids = np.random.choice(ids, extra, replace=False)
         rpn_match[ids] = 0
     # Same for negative proposals
-    ids = np.where(rpn_match == -1)[0]
+    ids = tf.where(rpn_match == -1)[0]
     extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE -
                         np.sum(rpn_match == 1))
     if extra > 0:
@@ -1520,7 +1520,7 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
 
     # For positive anchors, compute shift and scale needed to transform them
     # to match the corresponding GT boxes.
-    ids = np.where(rpn_match == 1)[0]
+    ids = tf.where(rpn_match == 1)[0]
     ix = 0  # index into rpn_bbox
     # TODO: use box_refinement() rather than duplicating the code here
     for i, a in zip(ids, anchors[ids]):
@@ -2437,7 +2437,7 @@ class MaskRCNN():
         """
         # How many detections do we have?
         # Detections array is padded with zeros. Find the first class_id == 0.
-        zero_ix = np.where(detections[:, 4] == 0)[0]
+        zero_ix = tf.where(detections[:, 4] == 0)[0]
         N = zero_ix[0] if zero_ix.shape[0] > 0 else detections.shape[0]
 
         # Extract boxes, class_ids, scores, and class-specific masks
@@ -2461,7 +2461,7 @@ class MaskRCNN():
 
         # Filter out detections with zero area. Happens in early training when
         # network weights are still random
-        exclude_ix = np.where(
+        exclude_ix = tf.where(
             (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]) <= 0)[0]
         if exclude_ix.shape[0] > 0:
             boxes = np.delete(boxes, exclude_ix, axis=0)
